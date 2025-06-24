@@ -5,10 +5,14 @@ namespace App\Http\Controllers;
 use App\Http\Requests\Post\StorePostRequest;
 use App\Http\Requests\Post\UpdatePostRequest;
 use App\Models\Post;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Auth;
 
 class PostController extends Controller
 {
+    use AuthorizesRequests;
+
     public function index(): JsonResponse
     {
         $posts = Post::with('user')
@@ -18,58 +22,56 @@ class PostController extends Controller
         return response()->json($posts);
     }
 
-    public function create()
+    public function create(): JsonResponse
     {
-        return 'posts.create';
+        return response()->json(['message' => 'posts.create']);
     }
 
-    public function store(StorePostRequest $request)
+    public function store(StorePostRequest $request): JsonResponse
     {
         $data = $request->validated();
+        $data['user_id'] = Auth::id();
 
-        Post::create([
-            'user_id' => auth()->id(),
-            ...$data,
-        ]);
+        $post = Post::create($data);
 
-        return redirect()->route('dashboard');
+        return response()->json([
+            'message' => 'Post created successfully.',
+            'post' => $post,
+        ], 201);
     }
 
-    public function show(Post $post)
+    public function show(Post $post): JsonResponse
     {
-        if ($post->is_draft || $post->published_at > now()) {
+        if (! $post->isActive()) {
             abort(404);
         }
 
         return response()->json($post);
     }
 
-    public function edit(Post $post)
+    public function edit(Post $post): JsonResponse
     {
-        return 'posts.edit';
+        return response()->json(['message' => 'posts.edit']);
     }
 
-    public function update(UpdatePostRequest $request, Post $post)
+    public function update(UpdatePostRequest $request, Post $post): JsonResponse
     {
-        if ($post->user_id !== auth()->id()) {
-            abort(403);
-        }
+        $this->authorize('update', $post);
 
-        $data = $request->validated();
+        $post->update($request->validated());
 
-        $post->update($data);
-
-        return redirect()->route('dashboard');
+        return response()->json([
+            'message' => 'Post updated successfully.',
+            'post' => $post,
+        ]);
     }
 
-    public function destroy(Post $post)
+    public function destroy(Post $post): JsonResponse
     {
-        if ($post->user_id !== auth()->id()) {
-            abort(403, 'Unauthorized action.');
-        }
+        $this->authorize('delete', $post);
 
         $post->delete();
 
-        return redirect()->route('dashboard')->with('success', 'Post deleted successfully.');
+        return response()->json(['message' => 'Post deleted successfully.']);
     }
 }

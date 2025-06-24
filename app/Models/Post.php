@@ -7,7 +7,6 @@ use Illuminate\Database\Eloquent\Model;
 
 class Post extends Model
 {
-    /** @use HasFactory<\Database\Factories\UserFactory> */
     use HasFactory;
 
     protected $fillable = [
@@ -18,6 +17,11 @@ class Post extends Model
         'published_at',
     ];
 
+    protected $casts = [
+        'is_draft' => 'boolean',
+        'published_at' => 'datetime',
+    ];
+
     public function user()
     {
         return $this->belongsTo(User::class);
@@ -25,7 +29,22 @@ class Post extends Model
 
     public function scopeActive($query)
     {
-        return $query->where('is_draft', 0)
-            ->whereNotNull('published_at');
+        return $query->where('is_draft', false)
+            ->where('published_at', '<=', now());
+    }
+
+    public function isScheduled(): bool
+    {
+        return ! $this->is_draft && $this->published_at && $this->published_at->isFuture();
+    }
+
+    public function isActive(): bool
+    {
+        return ! $this->is_draft && $this->published_at <= now();
+    }
+
+    public function getRouteKeyName(): string
+    {
+        return 'id';
     }
 }

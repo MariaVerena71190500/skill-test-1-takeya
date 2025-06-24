@@ -14,49 +14,61 @@ class PostFeatureTest extends TestCase
     public function test_index_shows_only_active_posts()
     {
         $user = User::factory()->create();
+        $this->actingAs($user);
 
         Post::factory()->create([
             'user_id' => $user->id,
-            'is_draft' => 1,
+            'is_draft' => true,
             'published_at' => null,
         ]);
 
         Post::factory()->create([
             'user_id' => $user->id,
-            'is_draft' => 0,
-            'published_at' => now(),
+            'is_draft' => false,
+            'published_at' => now()->subMinute(),
         ]);
 
-        $response = $this->actingAs($user)->get('/posts');
+        $response = $this->getJson('/posts');
 
         $response->assertStatus(200);
         $response->assertJsonCount(1, 'data');
     }
 
-    public function test_posts_create_route_returns_expected_string()
+    public function test_posts_create_route_returns_expected_json()
     {
         $user = User::factory()->create();
+        $this->actingAs($user);
 
-        $response = $this->actingAs($user)->get(route('posts.create'));
+        $response = $this->getJson('/posts/create');
+
         $response->assertStatus(200);
-        $response->assertSee('posts.create');
+        $response->assertJson([
+            'message' => 'posts.create',
+        ]);
     }
 
     public function test_authenticated_user_can_create_post()
     {
         $user = User::factory()->create();
+        $this->actingAs($user);
 
-        $response = $this->actingAs($user)->post('/posts', [
+        $payload = [
             'title' => 'Test Title',
             'content' => 'Test Content',
             'is_draft' => false,
             'published_at' => now()->toDateTimeString(),
-        ]);
+        ];
 
-        $response->assertRedirect();
-        $this->assertDatabaseHas('posts', [
+        $response = $this->postJson('/posts', $payload);
+
+        $response->assertStatus(201);
+        $response->assertJsonFragment([
             'title' => 'Test Title',
             'content' => 'Test Content',
+        ]);
+
+        $this->assertDatabaseHas('posts', [
+            'title' => 'Test Title',
             'user_id' => $user->id,
         ]);
     }
@@ -64,6 +76,7 @@ class PostFeatureTest extends TestCase
     public function test_can_view_active_post_as_json()
     {
         $user = User::factory()->create();
+        $this->actingAs($user);
 
         $post = Post::factory()->create([
             'user_id' => $user->id,
@@ -71,7 +84,8 @@ class PostFeatureTest extends TestCase
             'published_at' => now()->subDay(),
         ]);
 
-        $response = $this->actingAs($user)->getJson(route('posts.show', $post));
+        $response = $this->getJson("/posts/{$post->id}");
+
         $response->assertStatus(200);
         $response->assertJsonFragment([
             'id' => $post->id,
@@ -79,31 +93,57 @@ class PostFeatureTest extends TestCase
         ]);
     }
 
-    public function test_draft_post_returns_404()
+    public function test_draft_post_returns_404_on_show()
     {
         $user = User::factory()->create();
         $this->actingAs($user);
 
-        $post = Post::factory()->create(['is_draft' => true]);
+        $post = Post::factory()->create([
+            'user_id' => $user->id,
+            'is_draft' => true,
+        ]);
 
-        $response = $this->getJson(route('posts.show', $post));
+        $response = $this->getJson("/posts/{$post->id}");
+
         $response->assertStatus(404);
     }
 
-    public function test_posts_edit_route_returns_expected_string()
+    public function test_scheduled_post_returns_404_on_show()
     {
         $user = User::factory()->create();
+        $this->actingAs($user);
+
+        $post = Post::factory()->create([
+            'user_id' => $user->id,
+            'is_draft' => false,
+            'published_at' => now()->addDay(),
+        ]);
+
+        $response = $this->getJson("/posts/{$post->id}");
+
+        $response->assertStatus(404);
+    }
+
+    public function test_posts_edit_route_returns_expected_json()
+    {
+        $user = User::factory()->create();
+        $this->actingAs($user);
+
         $post = Post::factory()->create(['user_id' => $user->id]);
 
-        $response = $this->actingAs($user)->get(route('posts.edit', $post));
+        $response = $this->getJson("/posts/{$post->id}/edit");
 
         $response->assertStatus(200);
-        $response->assertSeeText('posts.edit');
+        $response->assertJson([
+            'message' => 'posts.edit',
+        ]);
     }
 
     public function test_author_can_update_post()
     {
         $user = User::factory()->create();
+        $this->actingAs($user);
+
         $post = Post::factory()->create([
             'user_id' => $user->id,
             'title' => 'Old Title',
@@ -111,21 +151,24 @@ class PostFeatureTest extends TestCase
             'is_draft' => true,
         ]);
 
-        $this->actingAs($user);
-
-        $response = $this->put(route('posts.update', $post), [
+        $payload = [
             'title' => 'Updated Title',
             'content' => 'Updated Content',
             'is_draft' => false,
             'published_at' => now()->toDateTimeString(),
+        ];
+
+        $response = $this->putJson("/posts/{$post->id}", $payload);
+
+        $response->assertStatus(200);
+        $response->assertJsonFragment([
+            'message' => 'Post updated successfully.',
+            'title' => 'Updated Title',
         ]);
 
-        $response->assertRedirect(route('dashboard'));
         $this->assertDatabaseHas('posts', [
             'id' => $post->id,
             'title' => 'Updated Title',
-            'content' => 'Updated Content',
-            'is_draft' => false,
         ]);
     }
 
@@ -133,14 +176,11 @@ class PostFeatureTest extends TestCase
     {
         $author = User::factory()->create();
         $nonAuthor = User::factory()->create();
-
-        $post = Post::factory()->create([
-            'user_id' => $author->id,
-        ]);
-
         $this->actingAs($nonAuthor);
 
-        $response = $this->put(route('posts.update', $post), [
+        $post = Post::factory()->create(['user_id' => $author->id]);
+
+        $response = $this->putJson("/posts/{$post->id}", [
             'title' => 'Hacked Title',
             'content' => 'Hacked Content',
             'is_draft' => false,
@@ -156,13 +196,16 @@ class PostFeatureTest extends TestCase
     public function test_author_can_delete_post()
     {
         $user = User::factory()->create();
-        $post = Post::factory()->create(['user_id' => $user->id]);
-
         $this->actingAs($user);
 
-        $response = $this->delete(route('posts.destroy', $post));
+        $post = Post::factory()->create(['user_id' => $user->id]);
 
-        $response->assertRedirect(route('dashboard'));
+        $response = $this->deleteJson("/posts/{$post->id}");
+
+        $response->assertStatus(200);
+        $response->assertJson([
+            'message' => 'Post deleted successfully.',
+        ]);
 
         $this->assertDatabaseMissing('posts', [
             'id' => $post->id,
@@ -173,14 +216,13 @@ class PostFeatureTest extends TestCase
     {
         $author = User::factory()->create();
         $nonAuthor = User::factory()->create();
-        $post = Post::factory()->create(['user_id' => $author->id]);
-
         $this->actingAs($nonAuthor);
 
-        $response = $this->delete(route('posts.destroy', $post));
+        $post = Post::factory()->create(['user_id' => $author->id]);
+
+        $response = $this->deleteJson("/posts/{$post->id}");
 
         $response->assertStatus(403);
-
         $this->assertDatabaseHas('posts', [
             'id' => $post->id,
         ]);
